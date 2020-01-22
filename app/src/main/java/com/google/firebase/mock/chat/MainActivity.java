@@ -243,6 +243,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onCancelled(@NonNull DatabaseError databaseError) {}
             };
+            mDatabaseReference.addChildEventListener(childEventListener);
         }
     }
     private void detachDatabaseReadListener(){
