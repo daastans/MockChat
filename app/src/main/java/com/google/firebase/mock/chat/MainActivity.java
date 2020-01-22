@@ -15,6 +15,8 @@
  */
 package com.google.firebase.mock.chat;
 
+import android.content.Intent;
+import android.graphics.Paint;
 import android.icu.util.Freezable;
 import android.os.Bundle;
 
@@ -33,7 +35,11 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ListView;
 import android.widget.ProgressBar;
+import android.widget.Toast;
 
+import com.firebase.ui.auth.AuthUI;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.database.ChildEventListener;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
@@ -41,6 +47,7 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -51,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
 
     public static final String ANONYMOUS = "anonymous";
     public static final int DEFAULT_MSG_LENGTH_LIMIT = 1000;
+    private static final int RC_SIGN_IN = 1;
 
     private ListView mMessageListView;
     private MessageAdapter mMessageAdapter;
@@ -64,6 +72,8 @@ public class MainActivity extends AppCompatActivity {
     private FirebaseDatabase mFirebaseDatabase;
     private DatabaseReference mDatabaseReference;
     private ChildEventListener childEventListener;
+    private FirebaseAuth firebaseAuth;
+    private FirebaseAuth.AuthStateListener authStateListener;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,8 +81,10 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         mUsername = ANONYMOUS;
-        mFirebaseDatabase=FirebaseDatabase.getInstance();
-        mDatabaseReference=mFirebaseDatabase.getReference().child("messages");
+        mFirebaseDatabase = FirebaseDatabase.getInstance();
+
+        firebaseAuth = FirebaseAuth.getInstance();
+        mDatabaseReference = mFirebaseDatabase.getReference().child("messages");
 
 
         // Initialize references to views
@@ -81,7 +93,6 @@ public class MainActivity extends AppCompatActivity {
         mPhotoPickerButton = (ImageButton) findViewById(R.id.photoPickerButton);
         mMessageEditText = (EditText) findViewById(R.id.messageEditText);
         mSendButton = (Button) findViewById(R.id.sendButton);
-
 
 
         // Initialize message ListView and its adapter
@@ -126,41 +137,66 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View view) {
                 // TODO: Send messages on click
-                FriendlyMessage friendlyMessage=new FriendlyMessage(mMessageEditText.getText().toString(),mUsername,null);
+                FriendlyMessage friendlyMessage = new FriendlyMessage(mMessageEditText.getText().toString(), mUsername, null);
                 mDatabaseReference.push().setValue(friendlyMessage);
 
                 // Clear input box
                 mMessageEditText.setText("");
             }
         });
-        childEventListener =new ChildEventListener() {
+
+
+        authStateListener = new FirebaseAuth.AuthStateListener() {
             @Override
-            public void onChildAdded(@NonNull DataSnapshot dataSnapshot, @Nullable String s) {
-                FriendlyMessage friendlyMessage=dataSnapshot.getValue(FriendlyMessage.class); //Deserializes data into class object
-                mMessageAdapter.add(friendlyMessage);
-            }
-
-            @Override
-            public void onChildChanged(@NonNull DataSnapshot dataSnapshot, @Nullable String s) {
-
-            }
-
-            @Override
-            public void onChildRemoved(@NonNull DataSnapshot dataSnapshot) {
-
-            }
-
-            @Override
-            public void onChildMoved(@NonNull DataSnapshot dataSnapshot, @Nullable String s) {
-
-            }
-
-            @Override
-            public void onCancelled(@NonNull DatabaseError databaseError) {
-
+            public void onAuthStateChanged(@NonNull FirebaseAuth firebaseAuth) {
+                FirebaseUser firebaseUser = firebaseAuth.getCurrentUser();
+                if (firebaseUser != null) {
+                    onSignedInInitialize(firebaseUser.getDisplayName());
+                } else {
+                    onSignedOutCleanup();
+                    startActivityForResult(
+                            AuthUI.getInstance()
+                                    .createSignInIntentBuilder()
+                                    .setIsSmartLockEnabled(false)
+                                    .setAvailableProviders(Arrays.asList(
+                                            new AuthUI.IdpConfig.EmailBuilder().build(),
+                                            new AuthUI.IdpConfig.PhoneBuilder().build(),
+                                            new AuthUI.IdpConfig.GoogleBuilder().build(),
+                                            new AuthUI.IdpConfig.TwitterBuilder().build()))
+                                    .build(),
+                            RC_SIGN_IN);
+                }
             }
         };
-        mDatabaseReference.addChildEventListener(childEventListener);
+        firebaseAuth.addAuthStateListener(authStateListener);
+    }
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == RC_SIGN_IN) {
+            if (resultCode == RESULT_OK) {
+                // Sign-in succeeded, set up the UI
+                Toast.makeText(this, "Signed in!", Toast.LENGTH_SHORT).show();
+            } else if (resultCode == RESULT_CANCELED) {
+                // Sign in was canceled by the user, finish the activity
+                Toast.makeText(this, "Sign in canceled", Toast.LENGTH_SHORT).show();
+                finish();
+            }
+        }
+    }
+    @Override
+    public void onPause(){
+        super.onPause();
+        if(authStateListener!=null) {
+            firebaseAuth.removeAuthStateListener(authStateListener);
+        }
+        detachDatabaseReadListener();
+        mMessageAdapter.clear();
+    }
+    @Override
+    public void onResume(){
+        super.onResume();
+        firebaseAuth.addAuthStateListener(authStateListener);
     }
 
     @Override
@@ -173,5 +209,40 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         return super.onOptionsItemSelected(item);
+    }
+    private void onSignedInInitialize(String username){
+        mUsername=username;
+        attachDatabaseReadListener();
+    }
+    private  void onSignedOutCleanup(){
+        mUsername=ANONYMOUS;
+        mMessageAdapter.clear();
+        detachDatabaseReadListener();
+
+    }
+    private void attachDatabaseReadListener(){
+        if(childEventListener==null) {
+            childEventListener = new ChildEventListener() {
+                @Override
+                public void onChildAdded(@NonNull DataSnapshot dataSnapshot, @Nullable String s) {
+                    FriendlyMessage friendlyMessage = dataSnapshot.getValue(FriendlyMessage.class); //Deserializes data into class object
+                    mMessageAdapter.add(friendlyMessage);
+                }
+                @Override
+                public void onChildChanged(@NonNull DataSnapshot dataSnapshot, @Nullable String s) {}
+                @Override
+                public void onChildRemoved(@NonNull DataSnapshot dataSnapshot) {}
+                @Override
+                public void onChildMoved(@NonNull DataSnapshot dataSnapshot, @Nullable String s) {}
+                @Override
+                public void onCancelled(@NonNull DatabaseError databaseError) {}
+            };
+        }
+    }
+    private void detachDatabaseReadListener(){
+        if(childEventListener!=null){
+            mDatabaseReference.removeEventListener(childEventListener);
+            childEventListener=null;
+        }
     }
 }
