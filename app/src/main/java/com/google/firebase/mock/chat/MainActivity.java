@@ -27,6 +27,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -200,13 +201,22 @@ public class MainActivity extends AppCompatActivity {
         }
             else if(requestCode==RC_PHOTO_PICKER && resultCode==RESULT_OK){
                 Uri selectedImageUri=data.getData();
-                StorageReference photoRef=mChatPhotoReference.child(selectedImageUri.getLastPathSegment());
+                final StorageReference photoRef=mChatPhotoReference.child(selectedImageUri.getLastPathSegment());
                 photoRef.putFile(selectedImageUri).addOnSuccessListener(this, new OnSuccessListener<UploadTask.TaskSnapshot>() {
                     @Override
                     public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
-                        String downloadUrl=taskSnapshot.getMetadata().getReference().getDownloadUrl().toString();
-                        FriendlyMessage friendlyMessage=new FriendlyMessage(null,mUsername,downloadUrl);
-                        mDatabaseReference.push().setValue(friendlyMessage);
+
+                        photoRef.getDownloadUrl().addOnSuccessListener(new OnSuccessListener<Uri>() {
+                            @Override
+                            public void onSuccess(Uri uri) {
+                                String downloadUrl=uri.toString();
+                                FriendlyMessage friendlyMessage=new FriendlyMessage(null,mUsername,downloadUrl);
+                                mDatabaseReference.push().setValue(friendlyMessage);
+                                Log.e("WWWWWWWWWWWWWWWWWWWWWWW",downloadUrl);
+                            }
+                        });
+
+
                     }
                 });
         }
